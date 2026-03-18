@@ -270,5 +270,13 @@ namespace Chess.Scripting
         {
             ctx.Emit(OpCode.CUSTOM_0 + (int)op, 0, 0, 0, line, comment);
         }
+
+        public bool TryCompileMethodCall(string objectName, string methodName,
+                                         List<AstNodes.ExprNode> args,
+                                         CompilerContext ctx, int sourceLine) => false;
+
+        public bool TryCompileObjectDecl(string typeName, string varName,
+                                         List<AstNodes.ExprNode> constructorArgs,
+                                         CompilerContext ctx, int sourceLine) => false;
     }
 }
