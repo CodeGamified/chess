@@ -49,7 +49,7 @@ namespace Chess.UI
         private float[] _revealThresholds;
         private const float AsciiHold = 5f;
         private const float AsciiAnim = 1f;
-        private const int AsciiWordCount = 4;
+        private const int AsciiWordCount = 3;
         private const int MaxStatusRows = 10;
         private static readonly char[] GlitchGlyphs =
             "░▒▓█▀▄▌▐╬╫╪╩╦╠╣─│┌┐└┘├┤┬┴┼".ToCharArray();
@@ -72,21 +72,13 @@ namespace Chess.UI
                 "  ██      ██ ██      ██ ██  ██  ██ ██          ",
                 "   █████████ ██      ██ ██  ██  ██  █████████  ",
             },
-            new[] // MATE
+            new[] // CHESS
             {
-                "  ██       ██  ████████  ██████████ █████████  ",
-                "  ████   ████ ██      ██     ██     ██         ",
-                "  ██ ██ ██ ██ ██████████     ██     ██████████ ",
-                "  ██  ███  ██ ██      ██     ██     ██         ",
-                "  ██       ██ ██      ██     ██     █████████  ",
-            },
-            new[] // KING
-            {
-                "  ██     ██ ██████████ ██      ██  █████████  ",
-                "  ██   ██       ██     ████    ██ ██          ",
-                "  █████         ██     ██  ██  ██ ██   █████  ",
-                "  ██   ██       ██     ██    ████ ██      ██  ",
-                "  ██     ██ ██████████ ██      ██  █████████  ",
+                "  ███████ ██    ██ ████████ ████████ ████████  ",
+                "  ██      ██    ██ ██       ██       ██        ",
+                "  ██      ████████ ████████ ████████ ████████  ",
+                "  ██      ██    ██ ██             ██       ██  ",
+                "  ███████ ██    ██ ████████ ████████ ████████  ",
             },
         };
 
