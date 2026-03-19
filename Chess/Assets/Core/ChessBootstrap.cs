@@ -11,6 +11,8 @@ using CodeGamified.Quality;
 using CodeGamified.Bootstrap;
 using Chess.Game;
 using Chess.Scripting;
+using Chess.AI;
+using Chess.UI;
 
 namespace Chess.Core
 {
@@ -70,6 +72,8 @@ namespace Chess.Core
         private ChessMatchManager _match;
         private ChessRenderer _renderer;
         private ChessProgram _playerProgram;
+        private ChessAIController _aiController;
+        private ChessTUIManager _tuiManager;
 
         // Camera
         private CameraAmbientMotion _cameraSway;
@@ -120,6 +124,9 @@ namespace Chess.Core
             CreateInputProvider();
 
             if (enableScripting) CreatePlayerProgram();
+
+            CreateAIController();
+            CreateTUIManager();
 
             WireEvents();
             StartCoroutine(RunBootSequence());
@@ -254,6 +261,31 @@ namespace Chess.Core
             _playerProgram = go.AddComponent<ChessProgram>();
             _playerProgram.Initialize(_match);
             Log("Created PlayerProgram (code-controlled Chess AI)");
+        }
+
+        // =================================================================
+        // AI CONTROLLER (script-driven Black)
+        // =================================================================
+
+        private void CreateAIController()
+        {
+            var go = new GameObject("AIController");
+            _aiController = go.AddComponent<ChessAIController>();
+            _aiController.Initialize(_match, AIDifficulty.Medium);
+            _match.UseScriptAI = true;
+            Log($"Created AIController (difficulty={_aiController.Difficulty}, script AI active)");
+        }
+
+        // =================================================================
+        // TUI MANAGER
+        // =================================================================
+
+        private void CreateTUIManager()
+        {
+            var go = new GameObject("TUIManager");
+            _tuiManager = go.AddComponent<ChessTUIManager>();
+            _tuiManager.Initialize(_match, _playerProgram, _aiController);
+            Log("Created TUIManager (left debugger + right debugger + status panel)");
         }
 
         // =================================================================

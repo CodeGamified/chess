@@ -30,6 +30,7 @@ namespace Chess.Scripting
         private ChessMatchManager _match;
         private ChessIOHandler _ioHandler;
         private ChessCompilerExtension _compilerExt;
+        private bool _isAISide;
 
         public const float OPS_PER_SECOND = 20f;
         private float _opAccumulator;
@@ -118,9 +119,11 @@ if turn == 1:
         public System.Action OnCodeChanged;
 
         public void Initialize(ChessMatchManager match,
-                               string initialCode = null, string programName = "ChessAI")
+                               string initialCode = null, string programName = "ChessAI",
+                               bool isAISide = false)
         {
             _match = match;
+            _isAISide = isAISide;
             _compilerExt = new ChessCompilerExtension();
 
             _programName = programName;
@@ -160,7 +163,7 @@ if turn == 1:
 
         protected override IGameIOHandler CreateIOHandler()
         {
-            _ioHandler = new ChessIOHandler(_match);
+            _ioHandler = new ChessIOHandler(_match, _isAISide);
             return _ioHandler;
         }
 

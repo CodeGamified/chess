@@ -9,17 +9,24 @@ namespace Chess.Scripting
     /// <summary>
     /// Game I/O handler for Chess — bridges CUSTOM opcodes to board state.
     /// Uses ChessOp (the final 32-opcode layout).
+    /// When isAISide is true, the perspective is flipped: "my pieces" = AI (black) pieces,
+    /// "my turn" = AI's turn, move() calls DoAIScriptMove instead of DoPlayerMove.
     /// </summary>
     public class ChessIOHandler : IGameIOHandler
     {
         private readonly ChessMatchManager _match;
         private readonly ChessBoard _board;
+        private readonly bool _isAISide;
 
-        public ChessIOHandler(ChessMatchManager match)
+        public ChessIOHandler(ChessMatchManager match, bool isAISide = false)
         {
             _match = match;
             _board = match.Board;
+            _isAISide = isAISide;
         }
+
+        /// <summary>Whether this is "my turn" from this handler's perspective.</summary>
+        private bool IsMyTurn => _isAISide ? !_match.IsPlayerTurn : _match.IsPlayerTurn;
 
         public bool PreExecute(Instruction inst, MachineState state) => true;
 
@@ -54,21 +61,21 @@ namespace Chess.Scripting
                     state.SetRegister(0, _board.TotalMoves);
                     break;
                 case ChessOp.GET_WHITE_PIECES:
-                    state.SetRegister(0, _board.WhitePieces);
+                    state.SetRegister(0, _isAISide ? _board.BlackPieces : _board.WhitePieces);
                     break;
                 case ChessOp.GET_BLACK_PIECES:
-                    state.SetRegister(0, _board.BlackPieces);
+                    state.SetRegister(0, _isAISide ? _board.WhitePieces : _board.BlackPieces);
                     break;
                 case ChessOp.GET_WHITE_MATERIAL:
-                    state.SetRegister(0, _board.WhiteMaterial);
+                    state.SetRegister(0, _isAISide ? _board.BlackMaterial : _board.WhiteMaterial);
                     break;
                 case ChessOp.GET_BLACK_MATERIAL:
-                    state.SetRegister(0, _board.BlackMaterial);
+                    state.SetRegister(0, _isAISide ? _board.WhiteMaterial : _board.BlackMaterial);
                     break;
 
                 // ── Turn / check ──
                 case ChessOp.IS_PLAYER_TURN:
-                    state.SetRegister(0, _match.IsPlayerTurn ? 1f : 0f);
+                    state.SetRegister(0, IsMyTurn ? 1f : 0f);
                     break;
                 case ChessOp.IS_IN_CHECK:
                     state.SetRegister(0, _match.IsInCheck ? 1f : 0f);
@@ -85,10 +92,10 @@ namespace Chess.Scripting
 
                 // ── Castling ──
                 case ChessOp.CAN_CASTLE_K:
-                    state.SetRegister(0, _match.CanCastleKingsideNow() ? 1f : 0f);
+                    state.SetRegister(0, (_isAISide ? _match.CanCastleKingsideNow(PieceColor.Black) : _match.CanCastleKingsideNow()) ? 1f : 0f);
                     break;
                 case ChessOp.CAN_CASTLE_Q:
-                    state.SetRegister(0, _match.CanCastleQueensideNow() ? 1f : 0f);
+                    state.SetRegister(0, (_isAISide ? _match.CanCastleQueensideNow(PieceColor.Black) : _match.CanCastleQueensideNow()) ? 1f : 0f);
                     break;
 
                 // ── En passant ──
@@ -166,10 +173,10 @@ namespace Chess.Scripting
                     state.SetRegister(0, _match.Winner);
                     break;
                 case ChessOp.GET_PLAYER_WINS:
-                    state.SetRegister(0, _match.PlayerWins);
+                    state.SetRegister(0, _isAISide ? _match.AIWins : _match.PlayerWins);
                     break;
                 case ChessOp.GET_AI_WINS:
-                    state.SetRegister(0, _match.AIWins);
+                    state.SetRegister(0, _isAISide ? _match.PlayerWins : _match.AIWins);
                     break;
                 case ChessOp.GET_INPUT:
                     state.SetRegister(0, ChessInputProvider.Instance != null
@@ -183,7 +190,9 @@ namespace Chess.Scripting
                     int fr = (int)state.GetRegister(1);
                     int tc = (int)state.GetRegister(2);
                     int tr = (int)state.GetRegister(3);
-                    state.SetRegister(0, _match.DoPlayerMove(fc, fr, tc, tr));
+                    state.SetRegister(0, _isAISide
+                        ? _match.DoAIScriptMove(fc, fr, tc, tr)
+                        : _match.DoPlayerMove(fc, fr, tc, tr));
                     break;
                 }
                 case ChessOp.SET_PROMOTION:

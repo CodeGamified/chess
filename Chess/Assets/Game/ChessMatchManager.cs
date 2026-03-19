@@ -41,6 +41,9 @@ namespace Chess.Game
         public bool IsPlayerTurn => _board.SideToMove == PieceColor.White;
         public bool IsInCheck => _board.IsInCheck(_board.SideToMove);
 
+        /// <summary>When true, the built-in C# AI is disabled and a script drives Black's moves.</summary>
+        public bool UseScriptAI { get; set; }
+
         public int LastFromCol { get; private set; } = -1;
         public int LastFromRow { get; private set; } = -1;
         public int LastToCol { get; private set; } = -1;
@@ -150,11 +153,32 @@ namespace Chess.Game
 
             OnTurnChanged?.Invoke();
 
-            // If player just moved, AI responds
-            if (wasWhiteTurn)
+            // If player just moved, AI responds (unless script AI is active)
+            if (wasWhiteTurn && !UseScriptAI)
                 DoAITurn();
 
             return 1;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // AI SCRIPT COMMAND (called by IOHandler when isAISide=true)
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>
+        /// AI script (Black) attempts a move. Returns 1 on success, 0 on failure.
+        /// </summary>
+        public int DoAIScriptMove(int fc, int fr, int tc, int tr)
+        {
+            if (!MatchInProgress || GameOver) return 0;
+            if (_board.SideToMove != PieceColor.Black) return 0;
+
+            var promoType = PromotionChoice;
+            if (promoType == PieceType.None) promoType = PieceType.Queen;
+
+            var move = _board.FindLegalMove(fc, fr, tc, tr, promoType);
+            if (!move.HasValue) return 0;
+
+            return ExecuteAndContinue(move.Value);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -525,8 +549,11 @@ namespace Chess.Game
 
         /// <summary>Can white castle kingside right now (has rights + path clear + not in check)?</summary>
         public bool CanCastleKingsideNow()
+            => CanCastleKingsideNow(PieceColor.White);
+
+        public bool CanCastleKingsideNow(PieceColor side)
         {
-            var moves = _board.GetLegalMovesFor(PieceColor.White);
+            var moves = _board.GetLegalMovesFor(side);
             foreach (var m in moves)
                 if (m.IsCastleK) return true;
             return false;
@@ -534,8 +561,11 @@ namespace Chess.Game
 
         /// <summary>Can white castle queenside right now?</summary>
         public bool CanCastleQueensideNow()
+            => CanCastleQueensideNow(PieceColor.White);
+
+        public bool CanCastleQueensideNow(PieceColor side)
         {
-            var moves = _board.GetLegalMovesFor(PieceColor.White);
+            var moves = _board.GetLegalMovesFor(side);
             foreach (var m in moves)
                 if (m.IsCastleQ) return true;
             return false;

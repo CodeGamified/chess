@@ -42,7 +42,7 @@ namespace Chess.Game
             _board = board;
             _cellSize = cellSize;
 
-            _originX = -(board.Size * cellSize) * 0.5f + cellSize * 0.5f;
+            _originX = -(ChessBoard.Size * cellSize) * 0.5f + cellSize * 0.5f;
             _originY = cellSize * 0.5f;
 
             BuildSquares();
@@ -117,6 +117,7 @@ namespace Chess.Game
             var go = GameObject.CreatePrimitive(shape);
             go.name = $"Piece_{piece}_{col}_{row}";
             go.transform.position = PieceWorldPos(col, row, zOffset);
+            go.transform.rotation = Quaternion.Euler(-90f, 0f, 0f);
             go.transform.localScale = scale * _cellSize;
             RemoveCollider(go);
 
