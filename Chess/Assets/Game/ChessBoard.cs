@@ -111,6 +111,9 @@ namespace Chess.Game
         private List<ChessMove> _cachedLegalMoves;
         private bool _legalMovesCacheValid;
 
+        // ── Threefold repetition tracking ──
+        private Dictionary<long, int> _positionHistory = new Dictionary<long, int>();
+
         public void Initialize()
         {
             _cells = new ChessPiece[Size, Size];
@@ -168,6 +171,9 @@ namespace Chess.Game
 
             RecountPieces();
             InvalidateLegalMoveCache();
+
+            _positionHistory.Clear();
+            RecordPosition();
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -718,6 +724,7 @@ namespace Chess.Game
 
             RecountPieces();
             InvalidateLegalMoveCache();
+            RecordPosition();
             return true;
         }
 
@@ -763,6 +770,16 @@ namespace Chess.Game
 
         /// <summary>50-move rule draw.</summary>
         public bool IsFiftyMoveRule => HalfMoveClock >= 100; // 50 full moves = 100 half moves
+
+        /// <summary>Threefold repetition draw (same position occurred 3+ times).</summary>
+        public bool IsThreefoldRepetition
+        {
+            get
+            {
+                long hash = ComputePositionHash();
+                return _positionHistory.TryGetValue(hash, out int count) && count >= 3;
+            }
+        }
 
         /// <summary>Insufficient material draw (K vs K, K+B vs K, K+N vs K).</summary>
         public bool IsInsufficientMaterial()
@@ -855,6 +872,38 @@ namespace Chess.Game
                 for (int r = 0; r < Size; r++)
                     if (IsAttacked(c, r, color)) count++;
             return count;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // POSITION HASHING (threefold repetition)
+        // ═══════════════════════════════════════════════════════════════
+
+        private long ComputePositionHash()
+        {
+            unchecked
+            {
+                long h = 17;
+                for (int c = 0; c < Size; c++)
+                    for (int r = 0; r < Size; r++)
+                        h = h * 31 + _cells[c, r].Raw;
+
+                h = h * 31 + (int)SideToMove;
+                h = h * 31 + (WhiteCanCastleK ? 1 : 0);
+                h = h * 31 + (WhiteCanCastleQ ? 2 : 0);
+                h = h * 31 + (BlackCanCastleK ? 4 : 0);
+                h = h * 31 + (BlackCanCastleQ ? 8 : 0);
+                h = h * 31 + (EnPassantCol + 1);
+                return h;
+            }
+        }
+
+        private void RecordPosition()
+        {
+            long hash = ComputePositionHash();
+            if (_positionHistory.TryGetValue(hash, out int count))
+                _positionHistory[hash] = count + 1;
+            else
+                _positionHistory[hash] = 1;
         }
 
         // ═══════════════════════════════════════════════════════════════

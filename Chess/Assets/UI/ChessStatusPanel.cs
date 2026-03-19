@@ -544,7 +544,7 @@ namespace Chess.UI
                     ? TUIColors.Fg(TUIColors.BrightGreen, "WHITE TURN")
                     : TUIColors.Fg(TUIColors.BrightYellow, "BLACK TURN");
                 lines.Add($"  {turn}");
-                string check = _match.IsInCheck ? TUIColors.Fg(TUIColors.BrightRed, " CHECK!") : "";
+                string check = _match.IsInCheck ? TUIColors.Fg(TUIColors.Red, " CHECK!") : "";
                 lines.Add($"  W:{_match.Board.WhitePieces} B:{_match.Board.BlackPieces}{check}");
                 lines.Add("");
                 int w = ColWidth(2);

@@ -82,10 +82,11 @@ namespace Chess.Scripting
                     break;
                 case ChessOp.GET_GAME_STATE:
                 {
-                    // 0=playing, 1=checkmate, 2=stalemate, 3=draw(50-move/insufficient)
+                    // 0=playing, 1=checkmate, 2=stalemate, 3=draw(50-move/insufficient/repetition)
                     if (_board.IsCheckmate()) state.SetRegister(0, 1f);
                     else if (_board.IsStalemate()) state.SetRegister(0, 2f);
-                    else if (_board.IsFiftyMoveRule || _board.IsInsufficientMaterial()) state.SetRegister(0, 3f);
+                    else if (_board.IsFiftyMoveRule || _board.IsInsufficientMaterial() ||
+                             _board.IsThreefoldRepetition) state.SetRegister(0, 3f);
                     else state.SetRegister(0, 0f);
                     break;
                 }

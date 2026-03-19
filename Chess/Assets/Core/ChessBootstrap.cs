@@ -328,6 +328,7 @@ namespace Chess.Core
                 {
                     string reason = "DRAW";
                     if (_board.IsStalemate()) reason = "STALEMATE";
+                    else if (_board.IsThreefoldRepetition) reason = "THREEFOLD REPETITION";
                     else if (_board.IsFiftyMoveRule) reason = "50-MOVE RULE";
                     else if (_board.IsInsufficientMaterial()) reason = "INSUFFICIENT MATERIAL";
                     Log($"{reason} │ P:{_match.PlayerWins} AI:{_match.AIWins} D:{_match.Draws}");

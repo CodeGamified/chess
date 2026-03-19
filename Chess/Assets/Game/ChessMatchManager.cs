@@ -230,7 +230,8 @@ namespace Chess.Game
                 return 0; // stalemate
             }
 
-            if (_board.IsFiftyMoveRule || _board.IsInsufficientMaterial())
+            if (_board.IsFiftyMoveRule || _board.IsInsufficientMaterial() ||
+                _board.IsThreefoldRepetition)
                 return 0; // draw
 
             // Move ordering: captures first, then promotions
@@ -477,7 +478,8 @@ namespace Chess.Game
                 return true;
             }
 
-            if (_board.IsStalemate() || _board.IsFiftyMoveRule || _board.IsInsufficientMaterial())
+            if (_board.IsStalemate() || _board.IsFiftyMoveRule ||
+                _board.IsInsufficientMaterial() || _board.IsThreefoldRepetition)
             {
                 EndGame(3); // draw
                 return true;
