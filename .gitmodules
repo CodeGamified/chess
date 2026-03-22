@@ -1,3 +1,7 @@
 [submodule "Chess/Assets/Engine"]
 	path = Chess/Assets/Engine
 	url = https://github.com/CodeGamified/.engine.git
+[submodule "Chess/Assets/ChessEngine"]
+	path = Chess/Assets/ChessEngine
+	url = https://github.com/SebLague/Chess-Coding-Adventure.git
+	branch = Chess-V2-UCI
