@@ -13,12 +13,16 @@ namespace Chess.Scripting
     /// ChessProgram — code-controlled Chess AI.
     /// Subclasses ProgramBehaviour from .engine.
     ///
-    /// EXECUTION MODEL (tick-based, deterministic):
-    ///   - Each simulation tick (~20 ops/sec sim-time), the script runs from the top
-    ///   - Memory (variables) persists across ticks
-    ///   - PC resets to 0 each tick
-    ///   - Each tick the script reads board state and calls move(fc,fr,tc,tr)
-    ///   - Results are IDENTICAL at 0.5x, 1x, 100x speed
+    /// EXECUTION MODEL (event-driven, deterministic):
+    ///   - Script runs at 20 ops/sec sim-time, only on this player's turn
+    ///   - Memory persists across ticks, PC resets on HALT
+    ///   - turn:  handler → fires when it becomes this player's turn
+    ///   - Script calls move(fc,fr,tc,tr) to make a move
+    ///   - After move(), opponent responds → turn: fires on active player
+    ///
+    /// Two-player: player (white) and AI (black) each have their own
+    /// ChessProgram instance. Scripts see their own perspective via
+    /// is_player_turn() and the isAISide flag.
     ///
     /// Chess is the most complex game in CodeGamified. Students can implement:
     ///   - Simple: pick first legal move
@@ -34,6 +38,12 @@ namespace Chess.Scripting
 
         public const float OPS_PER_SECOND = 20f;
         private float _opAccumulator;
+
+        // Event handler address (from compiled metadata)
+        private int _turnPC = -1;
+
+        /// <summary>True when it is this program's turn to move.</summary>
+        private bool IsMyTurn => _isAISide ? !_match.IsPlayerTurn : _match.IsPlayerTurn;
 
         private const string DEFAULT_CODE = @"# ♔ CHESS — Write your chess AI!
 # Your script runs at 20 ops/sec (sim-time).
@@ -93,21 +103,29 @@ namespace Chess.Scripting
 #   move(fc, fr, tc, tr)      → move piece → 1=ok, 0=fail
 #   set_promotion(type)       → set promo type (2=N 3=B 4=R 5=Q)
 #
-# This starter prefers captures, then first legal move:
-turn = is_player_turn()
-if turn == 1:
+# EVENT HANDLERS:
+#   turn:  → fires when it becomes your turn
+#
+# ────────────────────────────────────────────────────────────
+# ENGINE AI — powered by Chess.Core (alpha-beta search):
+#   engine_search(depth)      → best move index (R0=idx, R1=eval cp)
+#   engine_eval()             → static eval of position (centipawns)
+#   engine_eval_move(i)       → eval after making move i (centipawns)
+#   engine_piece_value(type)  → value in centipawns (1=100, 2=300, ...)
+#   engine_search_score()     → eval from last engine_search
+#   engine_search_depth()     → depth completed in last engine_search
+#
+# DIFFICULTY GUIDE:
+#   Easy:   engine_search(3)  — fast, basic tactics
+#   Medium: engine_search(6)  — sees combinations
+#   Expert: engine_search(12) — deep search with full pruning
+# ────────────────────────────────────────────────────────────
+#
+# This starter uses the engine at depth 5:
+turn:
     n = get_legal_move_count()
-    i = 0
-    best = -1
-    while i < n:
-        flags = get_move_flags(i)
-        if flags >= 1:
-            best = i
-            i = n
-        i = i + 1
-    if best < 0:
-        best = 0
     if n > 0:
+        best = engine_search(5)
         fc = get_move_from_col(best)
         fr = get_move_from_row(best)
         tc = get_move_to_col(best)
@@ -130,6 +148,13 @@ if turn == 1:
             _sourceCode = initialCode ?? DEFAULT_CODE;
             _autoRun = true;
 
+            // Wire match events to handler triggers
+            if (_match != null)
+            {
+                _match.OnMatchStarted += OnMatchStartedHandler;
+                _match.OnTurnChanged += OnTurnChangedHandler;
+            }
+
             LoadAndRun(_sourceCode);
         }
 
@@ -137,6 +162,20 @@ if turn == 1:
         {
             if (_executor == null || _program == null || _isPaused) return;
             if (_match == null || !_match.MatchInProgress || _match.GameOver) return;
+
+            // Poll for async engine search completion
+            if (_executor.State.IsWaiting && _match.IsSearchComplete)
+            {
+                int bestIdx = _match.CollectSearchResult();
+                _executor.State.SetRegister(0, bestIdx);
+                _executor.State.SetRegister(1, _match.LastSearchScore);
+                _executor.State.IsWaiting = false;
+                _executor.State.WaitTimeRemaining = 0f;
+                _executor.State.PC++; // advance past the ENGINE_SEARCH instruction
+            }
+
+            // Event-driven: skip ticks when it's not our turn
+            if (_turnPC >= 0 && !IsMyTurn) return;
 
             float timeScale = SimulationTime.Instance?.timeScale ?? 1f;
             if (SimulationTime.Instance != null && SimulationTime.Instance.isPaused) return;
@@ -151,8 +190,20 @@ if turn == 1:
             {
                 if (_executor.State.IsHalted)
                 {
-                    _executor.State.PC = 0;
-                    _executor.State.IsHalted = false;
+                    if (_turnPC >= 0)
+                    {
+                        // Re-trigger turn handler while still our turn
+                        if (IsMyTurn)
+                            JumpToHandler(_turnPC);
+                        else
+                            break; // idle until next event
+                    }
+                    else
+                    {
+                        // Legacy mode: restart from top
+                        _executor.State.PC = 0;
+                        _executor.State.IsHalted = false;
+                    }
                 }
                 _executor.ExecuteOne();
             }
@@ -169,7 +220,12 @@ if turn == 1:
 
         protected override CompiledProgram CompileSource(string source, string name)
         {
-            return PythonCompiler.Compile(source, name, _compilerExt);
+            var program = PythonCompiler.Compile(source, name, _compilerExt);
+
+            // Extract event handler address from compiled metadata
+            _turnPC = program.Metadata.TryGetValue("handler:turn", out var t) ? (int)t : -1;
+
+            return program;
         }
 
         protected override void ProcessEvents()
@@ -192,6 +248,46 @@ if turn == 1:
             if (_executor?.State == null) return;
             _executor.State.Reset();
             _opAccumulator = 0f;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // EVENT HANDLERS
+        // ═══════════════════════════════════════════════════════════════
+
+        private void OnMatchStartedHandler()
+        {
+            if (!IsMyTurn) return;
+            if (_executor?.State == null || _turnPC < 0) return;
+            JumpToHandler(_turnPC);
+        }
+
+        private void OnTurnChangedHandler()
+        {
+            if (!IsMyTurn) return;
+            if (_executor?.State == null || _turnPC < 0) return;
+            JumpToHandler(_turnPC);
+        }
+
+        /// <summary>
+        /// Interrupt current execution and jump PC to a handler address.
+        /// Clears call stack so we don't return into stale code.
+        /// </summary>
+        private void JumpToHandler(int handlerPC)
+        {
+            var s = _executor.State;
+            s.PC = handlerPC;
+            s.IsHalted = false;
+            s.IsWaiting = false;
+            s.Stack.Clear();
+        }
+
+        private void OnDestroy()
+        {
+            if (_match != null)
+            {
+                _match.OnMatchStarted -= OnMatchStartedHandler;
+                _match.OnTurnChanged -= OnTurnChangedHandler;
+            }
         }
     }
 }

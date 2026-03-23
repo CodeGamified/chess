@@ -202,6 +202,45 @@ namespace Chess.Scripting
                     state.SetRegister(0, 1f);
                     break;
                 }
+
+                // ── Engine AI ──
+                case ChessOp.ENGINE_SEARCH:
+                {
+                    int depth = (int)state.GetRegister(0);
+                    _match.BeginEngineSearch(depth);
+                    // Pause script execution; back up PC so we re-enter this instruction
+                    state.IsWaiting = true;
+                    state.WaitTimeRemaining = float.MaxValue;
+                    state.PC--;
+                    break;
+                }
+                case ChessOp.ENGINE_EVAL:
+                {
+                    state.SetRegister(0, _match.EngineStaticEval());
+                    break;
+                }
+                case ChessOp.ENGINE_EVAL_MOVE:
+                {
+                    int idx = (int)state.GetRegister(0);
+                    state.SetRegister(0, _match.EngineEvalMove(idx));
+                    break;
+                }
+                case ChessOp.ENGINE_PIECE_VALUE:
+                {
+                    int pType = (int)state.GetRegister(0);
+                    state.SetRegister(0, ChessMatchManager.EnginePieceValue(pType));
+                    break;
+                }
+                case ChessOp.ENGINE_SEARCH_SCORE:
+                {
+                    state.SetRegister(0, _match.LastSearchScore);
+                    break;
+                }
+                case ChessOp.ENGINE_SEARCH_DEPTH:
+                {
+                    state.SetRegister(0, _match.LastSearchDepth);
+                    break;
+                }
             }
         }
 

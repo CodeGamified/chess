@@ -9,8 +9,8 @@ namespace Chess.AI
     ///
     /// EASY:    Picks the first legal move.
     /// MEDIUM:  Prefers captures, then first move.
-    /// HARD:    Capture priority + center control + development.
-    /// EXPERT:  Material eval + captures + center + pawn structure.
+    /// HARD:    Engine alpha-beta search at depth 3.
+    /// EXPERT:  Engine alpha-beta search at depth 10.
     /// </summary>
     public enum AIDifficulty
     {

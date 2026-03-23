@@ -19,7 +19,7 @@ MonoBehaviour:
     width: 1904
     height: 973
   m_ShowMode: 4
-  m_Title: Game
+  m_Title: Console
   m_RootView: {fileID: 2}
   m_MinSize: {x: 875, y: 300}
   m_MaxSize: {x: 10000, y: 10000}
@@ -192,8 +192,8 @@ MonoBehaviour:
     y: 0
     width: 440
     height: 651
-  m_MinSize: {x: 200, y: 200}
-  m_MaxSize: {x: 4000, y: 4000}
+  m_MinSize: {x: 201, y: 226}
+  m_MaxSize: {x: 4001, y: 4026}
   m_ActualView: {fileID: 13}
   m_Panes:
   - {fileID: 13}
@@ -272,8 +272,8 @@ MonoBehaviour:
     y: 0
     width: 260
     height: 917
-  m_MinSize: {x: 275, y: 50}
-  m_MaxSize: {x: 4000, y: 4000}
+  m_MinSize: {x: 276, y: 76}
+  m_MaxSize: {x: 4001, y: 4026}
   m_ActualView: {fileID: 17}
   m_Panes:
   - {fileID: 17}
@@ -300,8 +300,8 @@ MonoBehaviour:
     m_TextWithWhitespace: "Game\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 448
-    y: 87
+    x: 441
+    y: 24
     width: 1202
     height: 625
   m_SerializedDataModeController:
@@ -401,8 +401,8 @@ MonoBehaviour:
     m_TextWithWhitespace: "Hierarchy\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 8
-    y: 87
+    x: 0
+    y: 24
     width: 439
     height: 625
   m_SerializedDataModeController:
@@ -1033,7 +1033,7 @@ MonoBehaviour:
   m_Rotation:
     m_Target: {x: -0.1184754, y: 0.030376418, z: -0.0036274155, w: -0.9924883}
     speed: 2
-    m_Value: {x: -0.11847509, y: 0.030376337, z: -0.003627406, w: -0.9924857}
+    m_Value: {x: -0.1184754, y: 0.030376418, z: -0.0036274155, w: -0.9924883}
   m_Size:
     m_Target: 33.681904
     speed: 2
@@ -1134,7 +1134,7 @@ MonoBehaviour:
     scrollPos: {x: 0, y: 0}
     m_SelectedIDs: acaf0000
     m_LastClickedID: 44972
-    m_ExpandedIDs: 0000000036ad0000
+    m_ExpandedIDs: 0000000020ae000000ca9a3bffffff7f
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -1163,7 +1163,7 @@ MonoBehaviour:
     scrollPos: {x: 0, y: 0}
     m_SelectedIDs: 
     m_LastClickedID: 0
-    m_ExpandedIDs: 0000000036ad0000
+    m_ExpandedIDs: 0000000020ae000000ca9a3bffffff7f
     m_RenameOverlay:
       m_UserAcceptedRename: 0
       m_Name: 
@@ -1242,8 +1242,8 @@ MonoBehaviour:
     m_TextWithWhitespace: "Console\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 8
-    y: 738
+    x: 0
+    y: 675
     width: 1643
     height: 240
   m_SerializedDataModeController:
@@ -1278,8 +1278,8 @@ MonoBehaviour:
     m_TextWithWhitespace: "Inspector\u200B"
   m_Pos:
     serializedVersion: 2
-    x: 1652
-    y: 87
+    x: 1645
+    y: 24
     width: 259
     height: 891
   m_SerializedDataModeController:

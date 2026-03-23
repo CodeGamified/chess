@@ -64,6 +64,14 @@ namespace Chess.Scripting
             // Commands
             new EditorFuncInfo { Name = "move",                 Hint = "move piece (fc,fr,tc,tr) → 1/0",  ArgCount = 4 },
             new EditorFuncInfo { Name = "set_promotion",        Hint = "set promo type (2=N 3=B 4=R 5=Q)", ArgCount = 1 },
+
+            // Engine AI
+            new EditorFuncInfo { Name = "engine_search",        Hint = "best move idx at depth → R0=idx, R1=eval", ArgCount = 1 },
+            new EditorFuncInfo { Name = "engine_eval",          Hint = "static eval (centipawns)",         ArgCount = 0 },
+            new EditorFuncInfo { Name = "engine_eval_move",     Hint = "eval after move i (centipawns)",   ArgCount = 1 },
+            new EditorFuncInfo { Name = "engine_piece_value",   Hint = "piece type value (1-6 → cp)",     ArgCount = 1 },
+            new EditorFuncInfo { Name = "engine_search_score",  Hint = "eval from last engine_search",     ArgCount = 0 },
+            new EditorFuncInfo { Name = "engine_search_depth",  Hint = "depth from last engine_search",    ArgCount = 0 },
         };
 
         public List<EditorMethodInfo> GetMethodsForType(string typeName) => new();
@@ -72,7 +80,8 @@ namespace Chess.Scripting
         {
             "fc", "fr", "tc", "tr", "n", "i", "best",
             "turn", "flags", "piece", "color", "type",
-            "check", "state", "mat_w", "mat_b", "score"
+            "check", "state", "mat_w", "mat_b", "score",
+            "depth", "eval", "best_idx"
         };
 
         public List<string> GetStringLiteralSuggestions() => new();

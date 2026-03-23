@@ -144,9 +144,8 @@ namespace Chess.UI
             _playerDebuggerRect = CreatePanel("P_Debugger",
                 new Vector2(pLeft, statusH), new Vector2(pRight, 1f));
             _playerDebugger = _playerDebuggerRect.gameObject.AddComponent<ChessCodeDebugger>();
+            _playerDebugger.InitializeProgrammatic(GetFont(), _fontSize);
             AddPanelBackground(_playerDebuggerRect);
-            _playerDebugger.InitializeProgrammatic(GetFont(), _fontSize,
-                _playerDebuggerRect.GetComponent<Image>());
             _playerDebugger.SetTitle("YOUR CODE");
             _playerDebugger.Bind(_playerProgram);
 
@@ -154,9 +153,8 @@ namespace Chess.UI
             _aiDebuggerRect = CreatePanel("AI_Debugger",
                 new Vector2(aLeft, statusH), new Vector2(aRight, 1f));
             _aiDebugger = _aiDebuggerRect.gameObject.AddComponent<ChessCodeDebugger>();
+            _aiDebugger.InitializeProgrammatic(GetFont(), _fontSize);
             AddPanelBackground(_aiDebuggerRect);
-            _aiDebugger.InitializeProgrammatic(GetFont(), _fontSize,
-                _aiDebuggerRect.GetComponent<Image>());
             _aiDebugger.SetTitle("AI CODE");
             _aiDebugger.SetMirrorPanels(true);
             if (_ai != null)
@@ -166,9 +164,8 @@ namespace Chess.UI
             _statusPanelRect = CreatePanel("StatusPanel",
                 new Vector2(0f, 0f), new Vector2(1f, statusH));
             _statusPanel = _statusPanelRect.gameObject.AddComponent<ChessStatusPanel>();
+            _statusPanel.InitializeProgrammatic(GetFont(), _fontSize - 1f);
             AddPanelBackground(_statusPanelRect);
-            _statusPanel.InitializeProgrammatic(GetFont(), _fontSize - 1f,
-                _statusPanelRect.GetComponent<Image>());
             _statusPanel.Bind(_match, _playerProgram, _ai);
             if (_equalizer != null)
                 _statusPanel.BindEqualizer(_equalizer);
@@ -315,7 +312,8 @@ namespace Chess.UI
             var img = panel.gameObject.GetComponent<Image>();
             if (img == null)
                 img = panel.gameObject.AddComponent<Image>();
-            img.color = new Color(0, 0, 0, 0.5f);
+            img.material = null;
+            img.color = new Color(0.02f, 0.01f, 0.06f, 0.45f);
             img.raycastTarget = true;
         }
 

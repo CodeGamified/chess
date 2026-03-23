@@ -13,6 +13,7 @@ using Chess.Game;
 using Chess.Scripting;
 using Chess.AI;
 using Chess.UI;
+using System.Collections.Generic;
 
 namespace Chess.Core
 {
@@ -74,6 +75,9 @@ namespace Chess.Core
         private ChessProgram _playerProgram;
         private ChessAIController _aiController;
         private ChessTUIManager _tuiManager;
+
+        // Move history
+        private readonly List<string> _moveHistory = new List<string>();
 
         // Camera
         private CameraAmbientMotion _cameraSway;
@@ -225,6 +229,17 @@ namespace Chess.Core
             var go = new GameObject("MatchManager");
             _match = go.AddComponent<ChessMatchManager>();
             _match.Initialize(_board, autoRestart, restartDelay, aiDepth);
+
+            // Load opening book from ChessEngine submodule
+            string bookPath = System.IO.Path.Combine(Application.dataPath,
+                "ChessEngine", "Chess-Coding-Adventure", "resources", "Book.txt");
+            if (System.IO.File.Exists(bookPath))
+            {
+                string bookText = System.IO.File.ReadAllText(bookPath);
+                _match.LoadOpeningBook(bookText);
+                Log("Loaded opening book from ChessEngine");
+            }
+
             Log($"Created MatchManager (AI depth={aiDepth}, autoRestart={autoRestart})");
         }
 
@@ -304,14 +319,19 @@ namespace Chess.Core
             {
                 _match.OnMatchStarted += () =>
                 {
+                    _moveHistory.Clear();
                     Log("MATCH STARTED");
                     _renderer?.RefreshAll();
                 };
 
                 _match.OnMoveMade += move =>
                 {
-                    Log($"MOVE │ {move}");
-                    _renderer?.RefreshAll();
+                    var piece = _board.GetCell(move.ToCol, move.ToRow);
+                    string pieceChar = PieceChar(piece.Type);
+                    string notation = $"{pieceChar}{move}";
+                    _moveHistory.Add(notation);
+                    Log($"MOVE │ {notation}  ║ {FormatMoveHistory()}");
+                    _renderer?.AnimateMove(move);
                 };
 
                 _match.OnCheck += () =>
@@ -338,7 +358,10 @@ namespace Chess.Core
                     Log($"GAME OVER │ Matches: {_match.MatchesPlayed} │ Moves: {_board.TotalMoves}");
 
                 _match.OnBoardChanged += () =>
-                    _renderer?.RefreshAll();
+                {
+                    if (_renderer != null && !_renderer.IsAnimating)
+                        _renderer.RefreshAll();
+                };
             }
         }
 
@@ -367,6 +390,29 @@ namespace Chess.Core
 
             _match.StartMatch();
             Log("First match started — e4!");
+        }
+
+        private static string PieceChar(PieceType type) => type switch
+        {
+            PieceType.King   => "K",
+            PieceType.Queen  => "Q",
+            PieceType.Rook   => "R",
+            PieceType.Bishop => "B",
+            PieceType.Knight => "N",
+            _                => ""
+        };
+
+        private string FormatMoveHistory()
+        {
+            var sb = new System.Text.StringBuilder();
+            for (int i = 0; i < _moveHistory.Count; i++)
+            {
+                if (i % 2 == 0)
+                    sb.Append($"{i / 2 + 1}. ");
+                sb.Append(_moveHistory[i]);
+                sb.Append(i % 2 == 0 ? " " : "  ");
+            }
+            return sb.ToString().TrimEnd();
         }
 
         private void OnDestroy()

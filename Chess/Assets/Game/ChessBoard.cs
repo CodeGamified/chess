@@ -1,6 +1,15 @@
 // Copyright CodeGamified 2025-2026
 // MIT License — Chess
+//
+// ChessBoard — powered by Sebastian Lague's Chess Coding Adventure engine.
+// Wraps Chess.Core.Board (bitboard engine) while maintaining the same public
+// API that the rest of the CodeGamified game layer expects.
 using System.Collections.Generic;
+using System.Linq;
+using Chess.Core;
+using CoreBoard = Chess.Core.Board;
+using CoreMove = Chess.Core.Move;
+using CorePiece = Chess.Core.Piece;
 
 namespace Chess.Game
 {
@@ -60,16 +69,9 @@ namespace Chess.Game
     }
 
     /// <summary>
-    /// Full chess board with complete rules.
-    ///
-    /// Standard chess on 8×8 board:
-    ///   - All piece movements (pawn, knight, bishop, rook, queen, king)
-    ///   - Castling (kingside and queenside) with full conditions
-    ///   - En passant capture
-    ///   - Pawn promotion (to queen, rook, bishop, or knight)
-    ///   - Check, checkmate, and stalemate detection
-    ///   - Legal move generation (only moves that don't leave king in check)
-    ///   - 50-move rule and simple draw detection
+    /// Full chess board powered by Chess.Core (Sebastian Lague's Chess Coding Adventure).
+    /// Provides the same public API as the original ChessBoard implementation,
+    /// but delegates to the high-performance bitboard-based engine internally.
     ///
     /// Coordinates: col 0-7 (a-h), row 0-7 (1-8).
     /// White (Player) at bottom (rows 0-1), Black (AI) at top (rows 6-7).
@@ -78,28 +80,31 @@ namespace Chess.Game
     {
         public const int Size = 8;
 
-        private ChessPiece[,] _cells;
+        // ── Core engine ──
+        internal CoreBoard Board { get; private set; }
+        private MoveGenerator _moveGen;
 
         // ── Castling rights ──
-        public bool WhiteCanCastleK { get; private set; }
-        public bool WhiteCanCastleQ { get; private set; }
-        public bool BlackCanCastleK { get; private set; }
-        public bool BlackCanCastleQ { get; private set; }
+        public bool WhiteCanCastleK => Board.CurrentGameState.HasKingsideCastleRight(true);
+        public bool WhiteCanCastleQ => Board.CurrentGameState.HasQueensideCastleRight(true);
+        public bool BlackCanCastleK => Board.CurrentGameState.HasKingsideCastleRight(false);
+        public bool BlackCanCastleQ => Board.CurrentGameState.HasQueensideCastleRight(false);
 
         // ── En passant ──
-        /// <summary>Column where en passant capture is valid (-1 if none).</summary>
-        public int EnPassantCol { get; private set; } = -1;
-        /// <summary>Row of the en passant target square (the square the capturing pawn lands on).</summary>
-        public int EnPassantRow { get; private set; } = -1;
+        public int EnPassantCol => Board.CurrentGameState.enPassantFile - 1;
+        public int EnPassantRow
+        {
+            get
+            {
+                if (Board.CurrentGameState.enPassantFile == 0) return -1;
+                return Board.IsWhiteToMove ? 5 : 2;
+            }
+        }
 
         // ── State tracking ──
-        public int TotalMoves { get; private set; }
-        public int HalfMoveClock { get; private set; } // moves since last pawn move or capture
-        public PieceColor SideToMove { get; private set; }
-
-        // ── King positions (cached for fast check detection) ──
-        private int _whiteKingCol, _whiteKingRow;
-        private int _blackKingCol, _blackKingRow;
+        public int TotalMoves => Board.PlyCount;
+        public int HalfMoveClock => Board.FiftyMoveCounter;
+        public PieceColor SideToMove => Board.IsWhiteToMove ? PieceColor.White : PieceColor.Black;
 
         // ── Piece counts ──
         public int WhitePieces { get; private set; }
@@ -107,73 +112,157 @@ namespace Chess.Game
         public int WhiteMaterial { get; private set; }
         public int BlackMaterial { get; private set; }
 
-        // ── Cached legal moves (invalidated on each move) ──
+        // ── Cached legal moves ──
         private List<ChessMove> _cachedLegalMoves;
+        private CoreMove[] _cachedCoreMoves;
         private bool _legalMovesCacheValid;
-
-        // ── Threefold repetition tracking ──
-        private Dictionary<long, int> _positionHistory = new Dictionary<long, int>();
 
         public void Initialize()
         {
-            _cells = new ChessPiece[Size, Size];
-            Reset();
+            Board = CoreBoard.CreateBoard();
+            _moveGen = new MoveGenerator();
+            _moveGen.promotionsToGenerate = MoveGenerator.PromotionMode.All;
+            RecountPieces();
         }
 
         public void Reset()
         {
-            // Clear board
-            for (int c = 0; c < Size; c++)
-                for (int r = 0; r < Size; r++)
-                    _cells[c, r] = ChessPiece.Empty;
-
-            // White pieces (row 0)
-            _cells[0, 0] = ChessPiece.WRook;
-            _cells[1, 0] = ChessPiece.WKnight;
-            _cells[2, 0] = ChessPiece.WBishop;
-            _cells[3, 0] = ChessPiece.WQueen;
-            _cells[4, 0] = ChessPiece.WKing;
-            _cells[5, 0] = ChessPiece.WBishop;
-            _cells[6, 0] = ChessPiece.WKnight;
-            _cells[7, 0] = ChessPiece.WRook;
-
-            // White pawns (row 1)
-            for (int c = 0; c < Size; c++)
-                _cells[c, 1] = ChessPiece.WPawn;
-
-            // Black pieces (row 7)
-            _cells[0, 7] = ChessPiece.BRook;
-            _cells[1, 7] = ChessPiece.BKnight;
-            _cells[2, 7] = ChessPiece.BBishop;
-            _cells[3, 7] = ChessPiece.BQueen;
-            _cells[4, 7] = ChessPiece.BKing;
-            _cells[5, 7] = ChessPiece.BBishop;
-            _cells[6, 7] = ChessPiece.BKnight;
-            _cells[7, 7] = ChessPiece.BRook;
-
-            // Black pawns (row 6)
-            for (int c = 0; c < Size; c++)
-                _cells[c, 6] = ChessPiece.BPawn;
-
-            // State
-            WhiteCanCastleK = true;
-            WhiteCanCastleQ = true;
-            BlackCanCastleK = true;
-            BlackCanCastleQ = true;
-            EnPassantCol = -1;
-            EnPassantRow = -1;
-            TotalMoves = 0;
-            HalfMoveClock = 0;
-            SideToMove = PieceColor.White;
-
-            _whiteKingCol = 4; _whiteKingRow = 0;
-            _blackKingCol = 4; _blackKingRow = 7;
-
-            RecountPieces();
+            Board.LoadStartPosition();
             InvalidateLegalMoveCache();
+            RecountPieces();
+        }
 
-            _positionHistory.Clear();
-            RecordPosition();
+        /// <summary>Load position from FEN string.</summary>
+        public void LoadPosition(string fen)
+        {
+            Board.LoadPosition(fen);
+            InvalidateLegalMoveCache();
+            RecountPieces();
+        }
+
+        /// <summary>Get current FEN string.</summary>
+        public string CurrentFEN => FenUtility.CurrentFen(Board);
+
+        // ═══════════════════════════════════════════════════════════════
+        // COORDINATE CONVERSION
+        // ═══════════════════════════════════════════════════════════════
+
+        internal static int ToSquareIndex(int col, int row) => row * 8 + col;
+        internal static int ColFromSquare(int sq) => sq & 7;
+        internal static int RowFromSquare(int sq) => sq >> 3;
+
+        // ═══════════════════════════════════════════════════════════════
+        // PIECE CONVERSION
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>Convert Chess.Core piece int to ChessPiece.</summary>
+        internal static ChessPiece FromCorePiece(int corePiece)
+        {
+            if (corePiece == 0) return ChessPiece.Empty;
+            // White: 1-6 → 1-6 (same), Black: 9-14 → 7-12
+            return new ChessPiece(corePiece <= 6 ? corePiece : corePiece - 2);
+        }
+
+        /// <summary>Convert ChessPiece to Chess.Core piece int.</summary>
+        internal static int ToCorePiece(ChessPiece piece)
+        {
+            if (piece.IsEmpty) return 0;
+            // White: 1-6 → 1-6 (same), Black: 7-12 → 9-14
+            return piece.Raw <= 6 ? piece.Raw : piece.Raw + 2;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // MOVE CONVERSION
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>Convert Chess.Core Move to ChessMove.</summary>
+        internal ChessMove FromCoreMove(CoreMove move)
+        {
+            int fromCol = ColFromSquare(move.StartSquare);
+            int fromRow = RowFromSquare(move.StartSquare);
+            int toCol = ColFromSquare(move.TargetSquare);
+            int toRow = RowFromSquare(move.TargetSquare);
+
+            MoveFlags flags = MoveFlags.Normal;
+            PieceType promoType = PieceType.None;
+
+            int targetPiece = Board.Square[move.TargetSquare];
+            if (targetPiece != CorePiece.None)
+                flags |= MoveFlags.Capture;
+
+            switch (move.MoveFlag)
+            {
+                case CoreMove.EnPassantCaptureFlag:
+                    flags |= MoveFlags.EnPassant | MoveFlags.Capture;
+                    break;
+                case CoreMove.CastleFlag:
+                    flags |= (toCol > fromCol) ? MoveFlags.CastleKingside : MoveFlags.CastleQueenside;
+                    break;
+                case CoreMove.PawnTwoUpFlag:
+                    flags |= MoveFlags.DoublePawnPush;
+                    break;
+                case CoreMove.PromoteToQueenFlag:
+                    flags |= MoveFlags.Promotion;
+                    promoType = PieceType.Queen;
+                    if (targetPiece != CorePiece.None) flags |= MoveFlags.Capture;
+                    break;
+                case CoreMove.PromoteToKnightFlag:
+                    flags |= MoveFlags.Promotion;
+                    promoType = PieceType.Knight;
+                    if (targetPiece != CorePiece.None) flags |= MoveFlags.Capture;
+                    break;
+                case CoreMove.PromoteToRookFlag:
+                    flags |= MoveFlags.Promotion;
+                    promoType = PieceType.Rook;
+                    if (targetPiece != CorePiece.None) flags |= MoveFlags.Capture;
+                    break;
+                case CoreMove.PromoteToBishopFlag:
+                    flags |= MoveFlags.Promotion;
+                    promoType = PieceType.Bishop;
+                    if (targetPiece != CorePiece.None) flags |= MoveFlags.Capture;
+                    break;
+            }
+
+            return new ChessMove(fromCol, fromRow, toCol, toRow, flags, promoType);
+        }
+
+        /// <summary>
+        /// Find the Chess.Core Move matching a ChessMove from the cached legal moves.
+        /// </summary>
+        internal CoreMove? ToCoreMove(ChessMove move)
+        {
+            EnsureLegalMoveCache();
+
+            int startSq = ToSquareIndex(move.FromCol, move.FromRow);
+            int targetSq = ToSquareIndex(move.ToCol, move.ToRow);
+            CoreMove? firstMatch = null;
+
+            for (int i = 0; i < _cachedCoreMoves.Length; i++)
+            {
+                var m = _cachedCoreMoves[i];
+                if (m.StartSquare != startSq || m.TargetSquare != targetSq)
+                    continue;
+
+                if (move.IsPromotion)
+                {
+                    int expectedFlag = move.PromotionType switch
+                    {
+                        PieceType.Queen => CoreMove.PromoteToQueenFlag,
+                        PieceType.Rook => CoreMove.PromoteToRookFlag,
+                        PieceType.Knight => CoreMove.PromoteToKnightFlag,
+                        PieceType.Bishop => CoreMove.PromoteToBishopFlag,
+                        _ => CoreMove.PromoteToQueenFlag
+                    };
+                    if (m.MoveFlag == expectedFlag) return m;
+                    firstMatch ??= m;
+                }
+                else if (!m.IsPromotion)
+                {
+                    return m;
+                }
+            }
+
+            return firstMatch;
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -184,621 +273,152 @@ namespace Chess.Game
             => col >= 0 && col < Size && row >= 0 && row < Size;
 
         public ChessPiece GetCell(int col, int row)
-            => InBounds(col, row) ? _cells[col, row] : ChessPiece.Empty;
+        {
+            if (!InBounds(col, row)) return ChessPiece.Empty;
+            return FromCorePiece(Board.Square[ToSquareIndex(col, row)]);
+        }
 
         public void GetKingPos(PieceColor color, out int col, out int row)
         {
-            if (color == PieceColor.White) { col = _whiteKingCol; row = _whiteKingRow; }
-            else { col = _blackKingCol; row = _blackKingRow; }
+            int idx = (color == PieceColor.White) ? CoreBoard.WhiteIndex : CoreBoard.BlackIndex;
+            int sq = Board.KingSquare[idx];
+            col = ColFromSquare(sq);
+            row = RowFromSquare(sq);
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // ATTACK DETECTION
+        // ATTACK DETECTION (bitboard-powered)
         // ═══════════════════════════════════════════════════════════════
 
         /// <summary>Is the given square attacked by any piece of `attackerColor`?</summary>
         public bool IsAttacked(int col, int row, PieceColor attackerColor)
         {
-            // Knight attacks
-            int[][] knightOffsets = {
-                new[]{-2,-1}, new[]{-2,1}, new[]{-1,-2}, new[]{-1,2},
-                new[]{1,-2}, new[]{1,2}, new[]{2,-1}, new[]{2,1}
-            };
-            foreach (var off in knightOffsets)
-            {
-                int nc = col + off[0], nr = row + off[1];
-                if (InBounds(nc, nr))
-                {
-                    var p = _cells[nc, nr];
-                    if (p.IsColor(attackerColor) && p.Type == PieceType.Knight)
-                        return true;
-                }
-            }
-
-            // Pawn attacks
-            int pawnDir = (attackerColor == PieceColor.White) ? -1 : 1;
-            // Pawns attack from the attacker's perspective going forward
-            // White pawns at row r attack row r+1. So if we're checking
-            // if (col,row) is attacked by white, a white pawn at (col±1, row-1) attacks us.
-            int pawnSourceRow = row - (attackerColor == PieceColor.White ? 1 : -1);
-            for (int dc = -1; dc <= 1; dc += 2)
-            {
-                int pc = col + dc;
-                if (InBounds(pc, pawnSourceRow))
-                {
-                    var p = _cells[pc, pawnSourceRow];
-                    if (p.IsColor(attackerColor) && p.Type == PieceType.Pawn)
-                        return true;
-                }
-            }
-
-            // King attacks (adjacent squares)
-            for (int dc = -1; dc <= 1; dc++)
-            {
-                for (int dr = -1; dr <= 1; dr++)
-                {
-                    if (dc == 0 && dr == 0) continue;
-                    int kc = col + dc, kr = row + dr;
-                    if (InBounds(kc, kr))
-                    {
-                        var p = _cells[kc, kr];
-                        if (p.IsColor(attackerColor) && p.Type == PieceType.King)
-                            return true;
-                    }
-                }
-            }
-
-            // Sliding pieces: rook/queen (orthogonal) and bishop/queen (diagonal)
-            // Orthogonal (rook, queen)
-            int[][] orthDirs = { new[]{1,0}, new[]{-1,0}, new[]{0,1}, new[]{0,-1} };
-            foreach (var d in orthDirs)
-            {
-                if (SlidingAttack(col, row, d[0], d[1], attackerColor,
-                                  PieceType.Rook, PieceType.Queen))
-                    return true;
-            }
-
-            // Diagonal (bishop, queen)
-            int[][] diagDirs = { new[]{1,1}, new[]{1,-1}, new[]{-1,1}, new[]{-1,-1} };
-            foreach (var d in diagDirs)
-            {
-                if (SlidingAttack(col, row, d[0], d[1], attackerColor,
-                                  PieceType.Bishop, PieceType.Queen))
-                    return true;
-            }
-
-            return false;
+            if (!InBounds(col, row)) return false;
+            return IsSquareAttacked(ToSquareIndex(col, row), attackerColor);
         }
 
-        private bool SlidingAttack(int col, int row, int dc, int dr,
-                                   PieceColor attackerColor,
-                                   PieceType type1, PieceType type2)
+        private bool IsSquareAttacked(int square, PieceColor attackerColor)
         {
-            int c = col + dc, r = row + dr;
-            while (InBounds(c, r))
+            int attackColor = (attackerColor == PieceColor.White) ? CorePiece.White : CorePiece.Black;
+            ulong blockers = Board.AllPiecesBitboard;
+
+            // Orthogonal sliders (rook/queen)
+            ulong orthoSliders = Board.PieceBitboards[CorePiece.MakePiece(CorePiece.Rook, attackColor)]
+                               | Board.PieceBitboards[CorePiece.MakePiece(CorePiece.Queen, attackColor)];
+            if (orthoSliders != 0)
             {
-                var p = _cells[c, r];
-                if (!p.IsEmpty)
-                {
-                    if (p.IsColor(attackerColor) && (p.Type == type1 || p.Type == type2))
-                        return true;
-                    return false; // blocked
-                }
-                c += dc;
-                r += dr;
+                ulong rookAttacks = Magic.GetRookAttacks(square, blockers);
+                if ((rookAttacks & orthoSliders) != 0) return true;
             }
+
+            // Diagonal sliders (bishop/queen)
+            ulong diagSliders = Board.PieceBitboards[CorePiece.MakePiece(CorePiece.Bishop, attackColor)]
+                              | Board.PieceBitboards[CorePiece.MakePiece(CorePiece.Queen, attackColor)];
+            if (diagSliders != 0)
+            {
+                ulong bishopAttacks = Magic.GetBishopAttacks(square, blockers);
+                if ((bishopAttacks & diagSliders) != 0) return true;
+            }
+
+            // Knights
+            ulong knights = Board.PieceBitboards[CorePiece.MakePiece(CorePiece.Knight, attackColor)];
+            if ((BitBoardUtility.KnightAttacks[square] & knights) != 0) return true;
+
+            // Pawns (use reverse-perspective masks)
+            ulong pawns = Board.PieceBitboards[CorePiece.MakePiece(CorePiece.Pawn, attackColor)];
+            ulong pawnAttackMask = (attackerColor == PieceColor.White)
+                ? BitBoardUtility.BlackPawnAttacks[square]
+                : BitBoardUtility.WhitePawnAttacks[square];
+            if ((pawnAttackMask & pawns) != 0) return true;
+
+            // King
+            ulong king = Board.PieceBitboards[CorePiece.MakePiece(CorePiece.King, attackColor)];
+            if ((BitBoardUtility.KingMoves[square] & king) != 0) return true;
+
             return false;
         }
 
         /// <summary>Is the king of `color` currently in check?</summary>
         public bool IsInCheck(PieceColor color)
         {
-            GetKingPos(color, out int kc, out int kr);
+            if (color == SideToMove)
+                return Board.IsInCheck();
+
+            int colorIdx = (color == PieceColor.White) ? CoreBoard.WhiteIndex : CoreBoard.BlackIndex;
+            int kingSquare = Board.KingSquare[colorIdx];
             PieceColor enemy = (color == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-            return IsAttacked(kc, kr, enemy);
+            return IsSquareAttacked(kingSquare, enemy);
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // PSEUDO-LEGAL MOVE GENERATION
-        // ═══════════════════════════════════════════════════════════════
-
-        /// <summary>
-        /// Generate all pseudo-legal moves for a color (does NOT filter check).
-        /// </summary>
-        public List<ChessMove> GeneratePseudoLegalMoves(PieceColor color)
-        {
-            var moves = new List<ChessMove>(64);
-
-            for (int c = 0; c < Size; c++)
-            {
-                for (int r = 0; r < Size; r++)
-                {
-                    var piece = _cells[c, r];
-                    if (!piece.IsColor(color)) continue;
-
-                    switch (piece.Type)
-                    {
-                        case PieceType.Pawn:   GenPawnMoves(c, r, color, moves); break;
-                        case PieceType.Knight: GenKnightMoves(c, r, color, moves); break;
-                        case PieceType.Bishop: GenSlidingMoves(c, r, color, moves, true, false); break;
-                        case PieceType.Rook:   GenSlidingMoves(c, r, color, moves, false, true); break;
-                        case PieceType.Queen:  GenSlidingMoves(c, r, color, moves, true, true); break;
-                        case PieceType.King:   GenKingMoves(c, r, color, moves); break;
-                    }
-                }
-            }
-
-            return moves;
-        }
-
-        private void GenPawnMoves(int c, int r, PieceColor color, List<ChessMove> moves)
-        {
-            int dir = (color == PieceColor.White) ? 1 : -1;
-            int startRow = (color == PieceColor.White) ? 1 : 6;
-            int promoRow = (color == PieceColor.White) ? 7 : 0;
-
-            // Single push
-            int nr = r + dir;
-            if (InBounds(c, nr) && _cells[c, nr].IsEmpty)
-            {
-                if (nr == promoRow)
-                    AddPromotionMoves(c, r, c, nr, MoveFlags.Promotion, moves);
-                else
-                {
-                    moves.Add(new ChessMove(c, r, c, nr));
-
-                    // Double push from starting row
-                    if (r == startRow)
-                    {
-                        int nr2 = r + 2 * dir;
-                        if (_cells[c, nr2].IsEmpty)
-                            moves.Add(new ChessMove(c, r, c, nr2, MoveFlags.DoublePawnPush));
-                    }
-                }
-            }
-
-            // Captures (including en passant)
-            for (int dc = -1; dc <= 1; dc += 2)
-            {
-                int nc = c + dc;
-                if (!InBounds(nc, nr)) continue;
-
-                var target = _cells[nc, nr];
-                PieceColor enemy = (color == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-
-                if (target.IsColor(enemy))
-                {
-                    if (nr == promoRow)
-                        AddPromotionMoves(c, r, nc, nr, MoveFlags.Promotion | MoveFlags.Capture, moves);
-                    else
-                        moves.Add(new ChessMove(c, r, nc, nr, MoveFlags.Capture));
-                }
-                else if (nc == EnPassantCol && nr == EnPassantRow)
-                {
-                    moves.Add(new ChessMove(c, r, nc, nr, MoveFlags.EnPassant | MoveFlags.Capture));
-                }
-            }
-        }
-
-        private void AddPromotionMoves(int fc, int fr, int tc, int tr,
-                                        MoveFlags baseFlags, List<ChessMove> moves)
-        {
-            moves.Add(new ChessMove(fc, fr, tc, tr, baseFlags, PieceType.Queen));
-            moves.Add(new ChessMove(fc, fr, tc, tr, baseFlags, PieceType.Rook));
-            moves.Add(new ChessMove(fc, fr, tc, tr, baseFlags, PieceType.Bishop));
-            moves.Add(new ChessMove(fc, fr, tc, tr, baseFlags, PieceType.Knight));
-        }
-
-        private void GenKnightMoves(int c, int r, PieceColor color, List<ChessMove> moves)
-        {
-            int[][] offsets = {
-                new[]{-2,-1}, new[]{-2,1}, new[]{-1,-2}, new[]{-1,2},
-                new[]{1,-2}, new[]{1,2}, new[]{2,-1}, new[]{2,1}
-            };
-            foreach (var off in offsets)
-            {
-                int nc = c + off[0], nr = r + off[1];
-                if (!InBounds(nc, nr)) continue;
-                var target = _cells[nc, nr];
-                if (target.IsColor(color)) continue; // can't capture own
-                var flags = target.IsEmpty ? MoveFlags.Normal : MoveFlags.Capture;
-                moves.Add(new ChessMove(c, r, nc, nr, flags));
-            }
-        }
-
-        private void GenSlidingMoves(int c, int r, PieceColor color, List<ChessMove> moves,
-                                     bool diagonal, bool orthogonal)
-        {
-            int[][] dirs;
-            if (diagonal && orthogonal)
-                dirs = new[] {
-                    new[]{1,0}, new[]{-1,0}, new[]{0,1}, new[]{0,-1},
-                    new[]{1,1}, new[]{1,-1}, new[]{-1,1}, new[]{-1,-1}
-                };
-            else if (diagonal)
-                dirs = new[] {
-                    new[]{1,1}, new[]{1,-1}, new[]{-1,1}, new[]{-1,-1}
-                };
-            else
-                dirs = new[] {
-                    new[]{1,0}, new[]{-1,0}, new[]{0,1}, new[]{0,-1}
-                };
-
-            foreach (var d in dirs)
-            {
-                int nc = c + d[0], nr = r + d[1];
-                while (InBounds(nc, nr))
-                {
-                    var target = _cells[nc, nr];
-                    if (target.IsColor(color)) break; // blocked by own piece
-                    if (!target.IsEmpty)
-                    {
-                        moves.Add(new ChessMove(c, r, nc, nr, MoveFlags.Capture));
-                        break; // blocked after capture
-                    }
-                    moves.Add(new ChessMove(c, r, nc, nr));
-                    nc += d[0]; nr += d[1];
-                }
-            }
-        }
-
-        private void GenKingMoves(int c, int r, PieceColor color, List<ChessMove> moves)
-        {
-            // Normal king moves
-            for (int dc = -1; dc <= 1; dc++)
-            {
-                for (int dr = -1; dr <= 1; dr++)
-                {
-                    if (dc == 0 && dr == 0) continue;
-                    int nc = c + dc, nr = r + dr;
-                    if (!InBounds(nc, nr)) continue;
-                    var target = _cells[nc, nr];
-                    if (target.IsColor(color)) continue;
-                    var flags = target.IsEmpty ? MoveFlags.Normal : MoveFlags.Capture;
-                    moves.Add(new ChessMove(c, r, nc, nr, flags));
-                }
-            }
-
-            // Castling
-            PieceColor enemy = (color == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-            int row = (color == PieceColor.White) ? 0 : 7;
-            if (r != row || c != 4) return; // king not on starting square
-            if (IsAttacked(c, r, enemy)) return; // can't castle out of check
-
-            bool canK = (color == PieceColor.White) ? WhiteCanCastleK : BlackCanCastleK;
-            bool canQ = (color == PieceColor.White) ? WhiteCanCastleQ : BlackCanCastleQ;
-
-            // Kingside: king e→g, rook h→f
-            if (canK && _cells[5, row].IsEmpty && _cells[6, row].IsEmpty
-                && _cells[7, row].Type == PieceType.Rook && _cells[7, row].IsColor(color)
-                && !IsAttacked(5, row, enemy) && !IsAttacked(6, row, enemy))
-            {
-                moves.Add(new ChessMove(4, row, 6, row, MoveFlags.CastleKingside));
-            }
-
-            // Queenside: king e→c, rook a→d
-            if (canQ && _cells[3, row].IsEmpty && _cells[2, row].IsEmpty && _cells[1, row].IsEmpty
-                && _cells[0, row].Type == PieceType.Rook && _cells[0, row].IsColor(color)
-                && !IsAttacked(3, row, enemy) && !IsAttacked(2, row, enemy))
-            {
-                moves.Add(new ChessMove(4, row, 2, row, MoveFlags.CastleQueenside));
-            }
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        // LEGAL MOVE GENERATION (filters out moves that leave king in check)
+        // LEGAL MOVE GENERATION
         // ═══════════════════════════════════════════════════════════════
 
         /// <summary>
         /// Get all fully legal moves for the current side to move.
-        /// Uses caching — call InvalidateLegalMoveCache() after state changes.
+        /// Uses caching — invalidated after each move.
         /// </summary>
         public List<ChessMove> GetLegalMoves()
         {
-            if (_legalMovesCacheValid && _cachedLegalMoves != null)
-                return _cachedLegalMoves;
-
-            _cachedLegalMoves = GetLegalMovesFor(SideToMove);
-            _legalMovesCacheValid = true;
+            EnsureLegalMoveCache();
             return _cachedLegalMoves;
         }
 
-        /// <summary>Get all fully legal moves for a specific color.</summary>
-        public List<ChessMove> GetLegalMovesFor(PieceColor color)
+        private void EnsureLegalMoveCache()
         {
-            var pseudo = GeneratePseudoLegalMoves(color);
-            var legal = new List<ChessMove>(pseudo.Count);
+            if (_legalMovesCacheValid && _cachedLegalMoves != null)
+                return;
 
-            foreach (var move in pseudo)
-            {
-                if (IsMoveLegal(move, color))
-                    legal.Add(move);
-            }
-
-            return legal;
+            var coreMoves = _moveGen.GenerateMoves(Board);
+            _cachedCoreMoves = coreMoves.ToArray();
+            _cachedLegalMoves = new List<ChessMove>(_cachedCoreMoves.Length);
+            foreach (var m in _cachedCoreMoves)
+                _cachedLegalMoves.Add(FromCoreMove(m));
+            _legalMovesCacheValid = true;
         }
 
-        /// <summary>Test if a pseudo-legal move is truly legal (doesn't leave own king in check).</summary>
-        private bool IsMoveLegal(ChessMove move, PieceColor color)
+        /// <summary>Find the legal move list index of a Core Move (by value). Returns -1 if not found.</summary>
+        internal int IndexOfCoreMove(CoreMove move)
         {
-            // Make the move on a temporary basis
-            var undo = MakeMoveFast(move);
-            PieceColor enemy = (color == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-            GetKingPos(color, out int kc, out int kr);
-            bool inCheck = IsAttacked(kc, kr, enemy);
-            UndoMoveFast(move, undo);
-            return !inCheck;
+            EnsureLegalMoveCache();
+            for (int i = 0; i < _cachedCoreMoves.Length; i++)
+                if (_cachedCoreMoves[i].Value == move.Value) return i;
+            return -1;
         }
-
-        // ═══════════════════════════════════════════════════════════════
-        // MOVE EXECUTION — FAST (for legality testing, no state updates)
-        // ═══════════════════════════════════════════════════════════════
-
-        private struct UndoInfo
-        {
-            public ChessPiece CapturedPiece;
-            public int OldWhiteKingCol, OldWhiteKingRow;
-            public int OldBlackKingCol, OldBlackKingRow;
-        }
-
-        private UndoInfo MakeMoveFast(ChessMove move)
-        {
-            var undo = new UndoInfo
-            {
-                CapturedPiece = _cells[move.ToCol, move.ToRow],
-                OldWhiteKingCol = _whiteKingCol, OldWhiteKingRow = _whiteKingRow,
-                OldBlackKingCol = _blackKingCol, OldBlackKingRow = _blackKingRow,
-            };
-
-            var piece = _cells[move.FromCol, move.FromRow];
-
-            // Handle en passant capture
-            if (move.IsEnPassant)
-            {
-                int capturedPawnRow = (piece.Color == PieceColor.White) ? move.ToRow - 1 : move.ToRow + 1;
-                undo.CapturedPiece = _cells[move.ToCol, capturedPawnRow];
-                _cells[move.ToCol, capturedPawnRow] = ChessPiece.Empty;
-            }
-
-            // Handle castling rook movement
-            if (move.IsCastleK)
-            {
-                int row = move.FromRow;
-                _cells[5, row] = _cells[7, row];
-                _cells[7, row] = ChessPiece.Empty;
-            }
-            else if (move.IsCastleQ)
-            {
-                int row = move.FromRow;
-                _cells[3, row] = _cells[0, row];
-                _cells[0, row] = ChessPiece.Empty;
-            }
-
-            // Move piece
-            _cells[move.ToCol, move.ToRow] = piece;
-            _cells[move.FromCol, move.FromRow] = ChessPiece.Empty;
-
-            // Handle promotion
-            if (move.IsPromotion)
-            {
-                _cells[move.ToCol, move.ToRow] = ChessPiece.Create(piece.Color, move.PromotionType);
-            }
-
-            // Update king position
-            if (piece.Type == PieceType.King)
-            {
-                if (piece.IsWhite) { _whiteKingCol = move.ToCol; _whiteKingRow = move.ToRow; }
-                else { _blackKingCol = move.ToCol; _blackKingRow = move.ToRow; }
-            }
-
-            return undo;
-        }
-
-        private void UndoMoveFast(ChessMove move, UndoInfo undo)
-        {
-            var piece = _cells[move.ToCol, move.ToRow];
-
-            // Undo promotion
-            if (move.IsPromotion)
-            {
-                piece = ChessPiece.Create(piece.Color, PieceType.Pawn);
-            }
-
-            // Move piece back
-            _cells[move.FromCol, move.FromRow] = piece;
-
-            // Restore captured piece
-            if (move.IsEnPassant)
-            {
-                _cells[move.ToCol, move.ToRow] = ChessPiece.Empty;
-                int capturedPawnRow = (piece.Color == PieceColor.White) ? move.ToRow - 1 : move.ToRow + 1;
-                _cells[move.ToCol, capturedPawnRow] = undo.CapturedPiece;
-            }
-            else
-            {
-                _cells[move.ToCol, move.ToRow] = undo.CapturedPiece;
-            }
-
-            // Undo castling rook
-            if (move.IsCastleK)
-            {
-                int row = move.FromRow;
-                _cells[7, row] = _cells[5, row];
-                _cells[5, row] = ChessPiece.Empty;
-            }
-            else if (move.IsCastleQ)
-            {
-                int row = move.FromRow;
-                _cells[0, row] = _cells[3, row];
-                _cells[3, row] = ChessPiece.Empty;
-            }
-
-            // Restore king positions
-            _whiteKingCol = undo.OldWhiteKingCol;
-            _whiteKingRow = undo.OldWhiteKingRow;
-            _blackKingCol = undo.OldBlackKingCol;
-            _blackKingRow = undo.OldBlackKingRow;
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        // MOVE EXECUTION — FULL (updates all state)
-        // ═══════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// Execute a legal move, updating all board state.
-        /// Returns true if the move was executed.
-        /// Caller should verify legality first.
+        /// Get all fully legal moves for a specific color.
+        /// Core engine generates moves for the current side, so for the other
+        /// side a null-move switch is used.
         /// </summary>
-        public bool ExecuteMove(ChessMove move)
+        public List<ChessMove> GetLegalMovesFor(PieceColor color)
         {
-            var piece = _cells[move.FromCol, move.FromRow];
-            if (piece.IsEmpty) return false;
+            if (color == SideToMove)
+                return GetLegalMoves();
 
-            bool isCapture = move.IsCapture;
-            bool isPawnMove = piece.Type == PieceType.Pawn;
-
-            // Handle en passant capture
-            if (move.IsEnPassant)
+            // Switch perspective via null move (only valid when not in check)
+            if (!Board.IsInCheck())
             {
-                int capturedPawnRow = (piece.Color == PieceColor.White) ? move.ToRow - 1 : move.ToRow + 1;
-                _cells[move.ToCol, capturedPawnRow] = ChessPiece.Empty;
+                Board.MakeNullMove();
+                var coreMoves = _moveGen.GenerateMoves(Board);
+                var result = new List<ChessMove>(coreMoves.Length);
+                foreach (var m in coreMoves)
+                    result.Add(FromCoreMove(m));
+                Board.UnmakeNullMove();
+                return result;
             }
 
-            // Handle castling rook movement
-            if (move.IsCastleK)
-            {
-                int row = move.FromRow;
-                _cells[5, row] = _cells[7, row];
-                _cells[7, row] = ChessPiece.Empty;
-            }
-            else if (move.IsCastleQ)
-            {
-                int row = move.FromRow;
-                _cells[3, row] = _cells[0, row];
-                _cells[0, row] = ChessPiece.Empty;
-            }
-
-            // Move piece
-            _cells[move.ToCol, move.ToRow] = piece;
-            _cells[move.FromCol, move.FromRow] = ChessPiece.Empty;
-
-            // Handle promotion
-            if (move.IsPromotion)
-            {
-                var promoType = move.PromotionType != PieceType.None ? move.PromotionType : PieceType.Queen;
-                _cells[move.ToCol, move.ToRow] = ChessPiece.Create(piece.Color, promoType);
-            }
-
-            // Update king position
-            if (piece.Type == PieceType.King)
-            {
-                if (piece.IsWhite) { _whiteKingCol = move.ToCol; _whiteKingRow = move.ToRow; }
-                else { _blackKingCol = move.ToCol; _blackKingRow = move.ToRow; }
-            }
-
-            // Update castling rights
-            UpdateCastlingRights(move, piece);
-
-            // Update en passant
-            if (move.IsDoublePush)
-            {
-                EnPassantCol = move.ToCol;
-                EnPassantRow = (piece.Color == PieceColor.White) ? move.ToRow - 1 : move.ToRow + 1;
-            }
-            else
-            {
-                EnPassantCol = -1;
-                EnPassantRow = -1;
-            }
-
-            // Update half-move clock (50-move rule)
-            if (isPawnMove || isCapture)
-                HalfMoveClock = 0;
-            else
-                HalfMoveClock++;
-
-            TotalMoves++;
-
-            // Switch side to move
-            SideToMove = (SideToMove == PieceColor.White) ? PieceColor.Black : PieceColor.White;
-
-            RecountPieces();
-            InvalidateLegalMoveCache();
-            RecordPosition();
-            return true;
+            return new List<ChessMove>();
         }
 
-        private void UpdateCastlingRights(ChessMove move, ChessPiece piece)
+        /// <summary>
+        /// Generate all pseudo-legal moves for a color.
+        /// Core engine generates fully legal moves, so this returns legal moves.
+        /// Kept for API compatibility.
+        /// </summary>
+        public List<ChessMove> GeneratePseudoLegalMoves(PieceColor color)
         {
-            // King moved
-            if (piece.Type == PieceType.King)
-            {
-                if (piece.IsWhite) { WhiteCanCastleK = false; WhiteCanCastleQ = false; }
-                else { BlackCanCastleK = false; BlackCanCastleQ = false; }
-            }
-
-            // Rook moved or captured
-            if (move.FromCol == 0 && move.FromRow == 0) WhiteCanCastleQ = false;
-            if (move.FromCol == 7 && move.FromRow == 0) WhiteCanCastleK = false;
-            if (move.FromCol == 0 && move.FromRow == 7) BlackCanCastleQ = false;
-            if (move.FromCol == 7 && move.FromRow == 7) BlackCanCastleK = false;
-
-            // Rook captured on its starting square
-            if (move.ToCol == 0 && move.ToRow == 0) WhiteCanCastleQ = false;
-            if (move.ToCol == 7 && move.ToRow == 0) WhiteCanCastleK = false;
-            if (move.ToCol == 0 && move.ToRow == 7) BlackCanCastleQ = false;
-            if (move.ToCol == 7 && move.ToRow == 7) BlackCanCastleK = false;
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        // GAME STATE QUERIES
-        // ═══════════════════════════════════════════════════════════════
-
-        /// <summary>Is the current side to move in checkmate?</summary>
-        public bool IsCheckmate()
-        {
-            if (!IsInCheck(SideToMove)) return false;
-            return GetLegalMoves().Count == 0;
-        }
-
-        /// <summary>Is the current side to move in stalemate (no legal moves, not in check)?</summary>
-        public bool IsStalemate()
-        {
-            if (IsInCheck(SideToMove)) return false;
-            return GetLegalMoves().Count == 0;
-        }
-
-        /// <summary>50-move rule draw.</summary>
-        public bool IsFiftyMoveRule => HalfMoveClock >= 100; // 50 full moves = 100 half moves
-
-        /// <summary>Threefold repetition draw (same position occurred 3+ times).</summary>
-        public bool IsThreefoldRepetition
-        {
-            get
-            {
-                long hash = ComputePositionHash();
-                return _positionHistory.TryGetValue(hash, out int count) && count >= 3;
-            }
-        }
-
-        /// <summary>Insufficient material draw (K vs K, K+B vs K, K+N vs K).</summary>
-        public bool IsInsufficientMaterial()
-        {
-            if (WhitePieces > 2 || BlackPieces > 2) return false;
-            // Both sides have at most 1 piece each besides king
-            // Check if any pawns, rooks, or queens remain
-            for (int c = 0; c < Size; c++)
-            {
-                for (int r = 0; r < Size; r++)
-                {
-                    var p = _cells[c, r];
-                    if (p.IsEmpty) continue;
-                    if (p.Type == PieceType.Pawn || p.Type == PieceType.Rook ||
-                        p.Type == PieceType.Queen)
-                        return false;
-                }
-            }
-            return true; // only kings, bishops, and/or knights with ≤2 pieces per side
+            return GetLegalMovesFor(color);
         }
 
         /// <summary>
@@ -809,15 +429,15 @@ namespace Chess.Game
                                          PieceType promotionType = PieceType.Queen)
         {
             var moves = GetLegalMoves();
+            ChessMove? firstMatch = null;
             foreach (var m in moves)
             {
                 if (m.FromCol == fc && m.FromRow == fr && m.ToCol == tc && m.ToRow == tr)
                 {
-                    // For promotion moves, match the promotion type
                     if (m.IsPromotion)
                     {
-                        if (m.PromotionType == promotionType)
-                            return m;
+                        if (m.PromotionType == promotionType) return m;
+                        firstMatch ??= m;
                     }
                     else
                     {
@@ -825,13 +445,62 @@ namespace Chess.Game
                     }
                 }
             }
-            // If promotion type didn't match, return first matching move
-            foreach (var m in moves)
+            return firstMatch;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // MOVE EXECUTION
+        // ═══════════════════════════════════════════════════════════════
+
+        /// <summary>Execute a legal move, updating all board state.</summary>
+        public bool ExecuteMove(ChessMove move)
+        {
+            var coreMove = ToCoreMove(move);
+            if (!coreMove.HasValue) return false;
+
+            Board.MakeMove(coreMove.Value);
+            InvalidateLegalMoveCache();
+            RecountPieces();
+            return true;
+        }
+
+        /// <summary>Execute a move given as a Core Move directly (for AI integration).</summary>
+        internal bool ExecuteCoreMove(CoreMove move)
+        {
+            Board.MakeMove(move);
+            InvalidateLegalMoveCache();
+            RecountPieces();
+            return true;
+        }
+
+        // ═══════════════════════════════════════════════════════════════
+        // GAME STATE QUERIES
+        // ═══════════════════════════════════════════════════════════════
+
+        public bool IsCheckmate()
+        {
+            return Board.IsInCheck() && GetLegalMoves().Count == 0;
+        }
+
+        public bool IsStalemate()
+        {
+            return !Board.IsInCheck() && GetLegalMoves().Count == 0;
+        }
+
+        public bool IsFiftyMoveRule => Board.FiftyMoveCounter >= 100;
+
+        public bool IsThreefoldRepetition
+        {
+            get
             {
-                if (m.FromCol == fc && m.FromRow == fr && m.ToCol == tc && m.ToRow == tr)
-                    return m;
+                int count = Board.RepetitionPositionHistory.Count(z => z == Board.ZobristKey);
+                return count >= 3;
             }
-            return null;
+        }
+
+        public bool IsInsufficientMaterial()
+        {
+            return Arbiter.InsufficentMaterial(Board);
         }
 
         // ═══════════════════════════════════════════════════════════════
@@ -843,13 +512,32 @@ namespace Chess.Game
             WhitePieces = 0; BlackPieces = 0;
             WhiteMaterial = 0; BlackMaterial = 0;
 
-            for (int c = 0; c < Size; c++)
+            for (int sq = 0; sq < 64; sq++)
             {
-                for (int r = 0; r < Size; r++)
+                int piece = Board.Square[sq];
+                if (piece == CorePiece.None) continue;
+
+                int type = CorePiece.PieceType(piece);
+                int materialVal = type switch
                 {
-                    var p = _cells[c, r];
-                    if (p.IsWhite) { WhitePieces++; WhiteMaterial += p.MaterialValue; }
-                    else if (p.IsBlack) { BlackPieces++; BlackMaterial += p.MaterialValue; }
+                    CorePiece.Pawn => 100,
+                    CorePiece.Knight => 320,
+                    CorePiece.Bishop => 330,
+                    CorePiece.Rook => 500,
+                    CorePiece.Queen => 900,
+                    CorePiece.King => 20000,
+                    _ => 0
+                };
+
+                if (CorePiece.IsWhite(piece))
+                {
+                    WhitePieces++;
+                    WhiteMaterial += materialVal;
+                }
+                else
+                {
+                    BlackPieces++;
+                    BlackMaterial += materialVal;
                 }
             }
         }
@@ -858,61 +546,29 @@ namespace Chess.Game
         {
             _legalMovesCacheValid = false;
             _cachedLegalMoves = null;
+            _cachedCoreMoves = null;
         }
 
         // ═══════════════════════════════════════════════════════════════
         // UTILITY
         // ═══════════════════════════════════════════════════════════════
 
-        /// <summary>Count how many squares a color attacks (for mobility evaluation).</summary>
+        /// <summary>Count how many squares a color attacks.</summary>
         public int CountAttackedSquares(PieceColor color)
         {
             int count = 0;
-            for (int c = 0; c < Size; c++)
-                for (int r = 0; r < Size; r++)
-                    if (IsAttacked(c, r, color)) count++;
+            for (int sq = 0; sq < 64; sq++)
+                if (IsSquareAttacked(sq, color)) count++;
             return count;
         }
 
         // ═══════════════════════════════════════════════════════════════
-        // POSITION HASHING (threefold repetition)
-        // ═══════════════════════════════════════════════════════════════
-
-        private long ComputePositionHash()
-        {
-            unchecked
-            {
-                long h = 17;
-                for (int c = 0; c < Size; c++)
-                    for (int r = 0; r < Size; r++)
-                        h = h * 31 + _cells[c, r].Raw;
-
-                h = h * 31 + (int)SideToMove;
-                h = h * 31 + (WhiteCanCastleK ? 1 : 0);
-                h = h * 31 + (WhiteCanCastleQ ? 2 : 0);
-                h = h * 31 + (BlackCanCastleK ? 4 : 0);
-                h = h * 31 + (BlackCanCastleQ ? 8 : 0);
-                h = h * 31 + (EnPassantCol + 1);
-                return h;
-            }
-        }
-
-        private void RecordPosition()
-        {
-            long hash = ComputePositionHash();
-            if (_positionHistory.TryGetValue(hash, out int count))
-                _positionHistory[hash] = count + 1;
-            else
-                _positionHistory[hash] = 1;
-        }
-
-        // ═══════════════════════════════════════════════════════════════
-        // STATE RESTORE (used by AI search undo)
+        // STATE RESTORE (API compatibility — used to restore from save)
         // ═══════════════════════════════════════════════════════════════
 
         /// <summary>
-        /// Restore full board state from saved snapshot. Used by ChessMatchManager
-        /// for AI minimax undo.
+        /// Restore full board state from saved snapshot.
+        /// Builds a FEN and loads it on the core engine.
         /// </summary>
         public void RestoreState(ChessPiece[,] cells,
                                  bool wck, bool wcq, bool bck, bool bcq,
@@ -921,20 +577,56 @@ namespace Chess.Game
                                  int wkc, int wkr, int bkc, int bkr,
                                  int wp, int bp, int wm, int bm)
         {
-            for (int c = 0; c < Size; c++)
-                for (int r = 0; r < Size; r++)
-                    _cells[c, r] = cells[c, r];
+            var sb = new System.Text.StringBuilder();
 
-            WhiteCanCastleK = wck; WhiteCanCastleQ = wcq;
-            BlackCanCastleK = bck; BlackCanCastleQ = bcq;
-            EnPassantCol = epCol; EnPassantRow = epRow;
-            HalfMoveClock = halfMove; TotalMoves = totalMoves;
-            SideToMove = side;
-            _whiteKingCol = wkc; _whiteKingRow = wkr;
-            _blackKingCol = bkc; _blackKingRow = bkr;
-            WhitePieces = wp; BlackPieces = bp;
-            WhiteMaterial = wm; BlackMaterial = bm;
+            // Piece placement
+            for (int row = 7; row >= 0; row--)
+            {
+                int empty = 0;
+                for (int col = 0; col < 8; col++)
+                {
+                    var p = cells[col, row];
+                    if (p.IsEmpty)
+                    {
+                        empty++;
+                    }
+                    else
+                    {
+                        if (empty > 0) { sb.Append(empty); empty = 0; }
+                        char c = p.Type switch
+                        {
+                            PieceType.Pawn => 'P', PieceType.Knight => 'N',
+                            PieceType.Bishop => 'B', PieceType.Rook => 'R',
+                            PieceType.Queen => 'Q', PieceType.King => 'K',
+                            _ => '?'
+                        };
+                        sb.Append(p.IsBlack ? char.ToLower(c) : c);
+                    }
+                }
+                if (empty > 0) sb.Append(empty);
+                if (row > 0) sb.Append('/');
+            }
+
+            sb.Append(side == PieceColor.White ? " w " : " b ");
+
+            string castling = "";
+            if (wck) castling += "K";
+            if (wcq) castling += "Q";
+            if (bck) castling += "k";
+            if (bcq) castling += "q";
+            sb.Append(castling.Length > 0 ? castling : "-");
+
+            sb.Append(' ');
+            if (epCol >= 0 && epRow >= 0)
+                sb.Append($"{(char)('a' + epCol)}{epRow + 1}");
+            else
+                sb.Append('-');
+
+            sb.Append($" {halfMove} {totalMoves / 2 + 1}");
+
+            Board.LoadPosition(sb.ToString());
             InvalidateLegalMoveCache();
+            RecountPieces();
         }
     }
 }

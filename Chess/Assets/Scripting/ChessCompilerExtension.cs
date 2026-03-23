@@ -75,6 +75,14 @@ namespace Chess.Scripting
         // ── Commands ──
         MOVE               = 30,   // move(R0=fc, R1=fr, R2=tc, R3=tr) → R0: 1/0
         SET_PROMOTION      = 31,   // set_promotion(R0=type: 2=N, 3=B, 4=R, 5=Q)
+
+        // ── Engine AI ──
+        ENGINE_SEARCH      = 32,   // R0=depth → R0=best move index, R1=eval (cp)
+        ENGINE_EVAL        = 33,   // → R0=static eval (centipawns, side-to-move POV)
+        ENGINE_EVAL_MOVE   = 34,   // R0=move index → R0=eval after move (cp)
+        ENGINE_PIECE_VALUE = 35,   // R0=piece type (1-6) → R0=centipawn value
+        ENGINE_SEARCH_SCORE = 36,  // → R0=eval from last engine_search
+        ENGINE_SEARCH_DEPTH = 37,  // → R0=depth completed in last engine_search
     }
 
     /// <summary>
@@ -212,6 +220,29 @@ namespace Chess.Scripting
                 case "set_promotion":
                     CompileOneArg(args, ctx);
                     Emit(ctx, ChessOp.SET_PROMOTION, sourceLine, "set_promotion(R0=type) 2=N,3=B,4=R,5=Q");
+                    return true;
+
+                // ── Engine AI ──
+                case "engine_search":
+                    CompileOneArg(args, ctx);
+                    Emit(ctx, ChessOp.ENGINE_SEARCH, sourceLine, "engine_search(R0=depth) → R0=move idx, R1=eval");
+                    return true;
+                case "engine_eval":
+                    Emit(ctx, ChessOp.ENGINE_EVAL, sourceLine, "engine_eval → R0 (centipawns)");
+                    return true;
+                case "engine_eval_move":
+                    CompileOneArg(args, ctx);
+                    Emit(ctx, ChessOp.ENGINE_EVAL_MOVE, sourceLine, "engine_eval_move(R0=idx) → R0 (centipawns)");
+                    return true;
+                case "engine_piece_value":
+                    CompileOneArg(args, ctx);
+                    Emit(ctx, ChessOp.ENGINE_PIECE_VALUE, sourceLine, "engine_piece_value(R0=type) → R0 (centipawns)");
+                    return true;
+                case "engine_search_score":
+                    Emit(ctx, ChessOp.ENGINE_SEARCH_SCORE, sourceLine, "engine_search_score → R0");
+                    return true;
+                case "engine_search_depth":
+                    Emit(ctx, ChessOp.ENGINE_SEARCH_DEPTH, sourceLine, "engine_search_depth → R0");
                     return true;
 
                 default:
